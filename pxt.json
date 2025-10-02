@@ -10,12 +10,15 @@
         "README.md",
         "keypad.ts",
         "keypad.cpp",
-        "enums.d.ts"
+        "enums.d.ts",
+        "shims.d.ts"
     ],
     "testFiles": [
         "test.ts"
     ],
     "public": false,
-    "supportedTargets": ["microbit"],
+    "supportedTargets": [
+        "microbit"
+    ],
     "preferredEditor": "blocksprj"
 }
