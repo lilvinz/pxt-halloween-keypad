@@ -1,0 +1,21 @@
+{
+    "name": "halloween-keypad",
+    "version": "1.0.0",
+    "description": "TCA8418 5x5 Keypad Driver for Halloween Box - Kid Friendly Blocks",
+    "license": "MIT",
+    "dependencies": {
+        "core": "*"
+    },
+    "files": [
+        "README.md",
+        "keypad.ts",
+        "keypad.cpp",
+        "enums.d.ts"
+    ],
+    "testFiles": [
+        "test.ts"
+    ],
+    "public": false,
+    "supportedTargets": ["microbit"],
+    "preferredEditor": "blocksprj"
+}
