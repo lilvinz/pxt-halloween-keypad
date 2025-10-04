@@ -1,0 +1,18 @@
+{
+  "{id:category}HalloweenKeypad": "Halloween-Tastatur",
+  "HalloweenKeypad.initialize|block": "Halloween-Tastatur initialisieren",
+  "HalloweenKeypad.waitForAnyKey|block": "auf beliebigen Tastendruck warten (Timeout %timeoutMs ms)",
+  "HalloweenKeypad.waitForAnyKeyRelease|block": "auf beliebiges Loslassen warten (Timeout %timeoutMs ms)",
+  "HalloweenKeypad.waitForKeyPress|block": "auf Taste %keyNumber warten (Timeout %timeoutMs ms)",
+  "HalloweenKeypad.waitForKeyRelease|block": "auf Loslassen der Taste %keyNumber warten (Timeout %timeoutMs ms)",
+  "HalloweenKeypad.isKeyPressed|block": "Taste %keyNumber ist gedrückt",
+  "HalloweenKeypad.getLastKeyPressed|block": "letzte gedrückte Taste",
+  "HalloweenKeypad.getLastKeyReleased|block": "letzte losgelassene Taste",
+  "HalloweenKeypad.onKeyPressed|block": "wenn Taste %keyNumber gedrückt wird",
+  "HalloweenKeypad.onKeyReleased|block": "wenn Taste %keyNumber losgelassen wird",
+  "HalloweenKeypad.onAnyKeyPressed|block": "wenn eine beliebige Taste gedrückt wird",
+  "HalloweenKeypad.onAnyKeyReleased|block": "wenn eine beliebige Taste losgelassen wird",
+  "HalloweenKeypad.waitForSequence|block": "auf Tastenfolge %keys warten (Timeout %timeoutMs ms)",
+  "HalloweenKeypad.getKeyRow|block": "Zeile der Taste %keyNumber",
+  "HalloweenKeypad.getKeyColumn|block": "Spalte der Taste %keyNumber"
+}

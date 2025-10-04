@@ -3,10 +3,10 @@
  */
 //% weight=100 color=#ff6600 icon="\uf11c" block="Halloween Keypad"
 namespace HalloweenKeypad {
-    
+
     // I2C address for TCA8418
     const TCA8418_ADDR = 0x34;
-    
+
     // Register addresses
     const REG_CFG = 0x01;
     const REG_INT_STAT = 0x02;
@@ -17,277 +17,364 @@ namespace HalloweenKeypad {
     const REG_DEBOUNCE_DIS1 = 0x29;
     const REG_DEBOUNCE_DIS2 = 0x2A;
     const REG_DEBOUNCE_DIS3 = 0x2B;
-    
+
     let initialized = false;
-    let lastKey = 0;
-    let irqEnabled = false;
-    
-    // Key press handlers for each button (1-25)
-    let keyHandlers: (() => void)[] = [];
-    
+    let lastKeyPressed = 0;
+    let lastKeyReleased = 0;
+
+    // Track currently pressed keys (0..24)
+    let pressedKeys: boolean[] = [];
+
+    // Key press handlers for each button (0-24)
+    let keyPressHandlers: (() => void)[] = [];
+    let keyReleaseHandlers: (() => void)[] = [];
+
+    // Generic handlers for any key press/release (receives key number)
+    let anyKeyPressHandlers: ((key: number) => void)[] = [];
+    let anyKeyReleaseHandlers: ((key: number) => void)[] = [];
+
     /**
      * Initialize the 5x5 keypad
      */
+    //% blockId="halloween_keypad_initialize"
     //% block="initialize Halloween keypad"
     //% weight=100
     export function initialize(): void {
         if (initialized) return;
-        
+
         // Configure for 5x5 keypad matrix
-        writeRegister(REG_KP_GPIO1, 0xFF);  // R0-R4, C0-C2 as keypad
-        writeRegister(REG_KP_GPIO2, 0x03);  // C3-C4 as keypad
+        writeRegister(REG_KP_GPIO1, 0x1f);  // R0-R4 as keypad
+        writeRegister(REG_KP_GPIO2, 0x1f);  // C0-C4 as keypad
         writeRegister(REG_KP_GPIO3, 0x00);  // Not used
-        
-        // Enable debounce
-        writeRegister(REG_DEBOUNCE_DIS1, 0x00);
-        writeRegister(REG_DEBOUNCE_DIS2, 0xFC);
-        writeRegister(REG_DEBOUNCE_DIS3, 0xFF);
-        
-        // Configure interrupts and events
-        writeRegister(REG_CFG, 0x19);  // Enable key events + interrupt + overflow
-        
-        // Clear any pending events
+
+        // Disable debounce for GPIOs
+        writeRegister(REG_DEBOUNCE_DIS1, 0x1F);
+        writeRegister(REG_DEBOUNCE_DIS2, 0x1F);
+        writeRegister(REG_DEBOUNCE_DIS3, 0x03);
+
         clearEvents();
-        
+
+        // Configure interrupts and events
+        // 0x09 = INT enabled + Event mode + OVR flow (level-triggered, stays low while FIFO has events)
+        writeRegister(REG_CFG, 0x09);  // Enable key events + interrupt (edge mode)
+
+        // Reset pressed state
+        for (let i = 0; i < 25; i++) pressedKeys[i] = false;
+
+        initialized = true;
+
         // Set up IRQ pin (P2) as input with pull-up
         pins.setPull(DigitalPin.P2, PinPullMode.PullUp);
-        
-        initialized = true;
-        irqEnabled = true;
-        
-        // Set up interrupt handler on P2 (active low)
-        pins.onPulsed(DigitalPin.P2, PulseValue.Low, function () {
+
+        // Enable pin events on P2 - this is required before control.onEvent() works
+        pins.setEvents(DigitalPin.P2, PinEventType.Edge);
+
+        // Set up interrupt handler on P2 falling edge
+        control.onEvent(EventBusSource.MICROBIT_ID_IO_P2, EventBusValue.MICROBIT_PIN_EVT_FALL, function () {
             processKeyEvents();
         });
-        
-        // Also start background checker as fallback (in case IRQ not connected)
-        control.inBackground(checkKeys);
     }
-    
+
     /**
      * Wait for any key to be pressed
      */
-    //% block="wait for any key press"
+    //% blockId="halloween_keypad_wait_any_press"
+    //% block="wait for any key press (timeout $timeoutMs ms)"
+    //% timeoutMs.defl=0
     //% weight=95
-    export function waitForAnyKey(): number {
+    export function waitForAnyKey(timeoutMs?: number): number {
+        const start = input.runningTime();
         while (true) {
-            let key = readKeyPress();
-            if (key > 0) {
+            const [key, pressed] = readKeyEvent();
+            if (pressed && key > 0) {
                 return key;
             }
-            basic.pause(10);
-        }
-    }
-    
-    /**
-     * Wait for a specific key to be pressed
-     * @param keyNumber the key number (1-25) to wait for
-     */
-    //% block="wait for key $keyNumber to be pressed"
-    //% keyNumber.min=1 keyNumber.max=25 keyNumber.defl=1
-    //% weight=90
-    export function waitForKey(keyNumber: number): void {
-        while (true) {
-            let key = readKeyPress();
-            if (key === keyNumber) {
-                return;
+            if (timeoutMs && timeoutMs > 0 && (input.runningTime() - start) > timeoutMs) {
+                return 0;
             }
             basic.pause(10);
         }
     }
-    
+
+    /**
+     * Wait for any key to be released
+     */
+    //% blockId="halloween_keypad_wait_any_release"
+    //% block="wait for any key release (timeout $timeoutMs ms)"
+    //% timeoutMs.defl=0
+    //% weight=95
+    export function waitForAnyKeyRelease(timeoutMs?: number): number {
+        const start = input.runningTime();
+        while (true) {
+            const [key, pressed] = readKeyEvent();
+            if (!pressed && key > 0) {
+                return key;
+            }
+            if (timeoutMs && timeoutMs > 0 && (input.runningTime() - start) > timeoutMs) {
+                return 0;
+            }
+            basic.pause(10);
+        }
+    }
+
+    /**
+     * Wait for a specific key to be pressed
+     * @param keyNumber the key number (0-24) to wait for
+     */
+    //% blockId="halloween_keypad_wait_key_press"
+    //% block="wait for key $keyNumber to be pressed (timeout $timeoutMs ms)"
+    //% keyNumber.min=0 keyNumber.max=24 keyNumber.defl=0
+    //% timeoutMs.defl=0
+    //% weight=90
+    export function waitForKeyPress(keyNumber: number, timeoutMs?: number): boolean {
+        const start = input.runningTime();
+        while (true) {
+            const [key, pressed] = readKeyEvent();
+            if (pressed && key === keyNumber) {
+                return true;
+            }
+            if (timeoutMs && timeoutMs > 0 && (input.runningTime() - start) > timeoutMs) {
+                return false;
+            }
+            basic.pause(10);
+        }
+    }
+
+    /**
+     * Wait for a specific key to be released
+     * @param keyNumber the key number (0-24) to wait for
+     */
+    //% blockId="halloween_keypad_wait_key_release"
+    //% block="wait for key $keyNumber to be released (timeout $timeoutMs ms)"
+    //% keyNumber.min=0 keyNumber.max=24 keyNumber.defl=0
+    //% timeoutMs.defl=0
+    //% weight=90
+    export function waitForKeyRelease(keyNumber: number, timeoutMs?: number): boolean {
+        const start = input.runningTime();
+        while (true) {
+            const [key, pressed] = readKeyEvent();
+            if (!pressed && key === keyNumber) {
+                return true;
+            }
+            if (timeoutMs && timeoutMs > 0 && (input.runningTime() - start) > timeoutMs) {
+                return false;
+            }
+            basic.pause(10);
+        }
+    }
+
     /**
      * Check if a specific key is pressed right now
-     * @param keyNumber the key number (1-25) to check
      */
+    //% blockId="halloween_keypad_is_pressed"
     //% block="key $keyNumber is pressed"
-    //% keyNumber.min=1 keyNumber.max=25 keyNumber.defl=1
+    //% keyNumber.min=0 keyNumber.max=24 keyNumber.defl=0
     //% weight=85
     export function isKeyPressed(keyNumber: number): boolean {
-        let key = readKeyPress();
-        return key === keyNumber;
+        if (!initialized) return false;
+        if (keyNumber < 0 || keyNumber > 24) return false;
+        return !!pressedKeys[keyNumber];
     }
-    
+
     /**
      * Get the last key that was pressed
      */
+    //% blockId="halloween_keypad_last_pressed"
     //% block="last key pressed"
     //% weight=80
-    export function getLastKey(): number {
-        return lastKey;
+    export function getLastKeyPressed(): number {
+        return lastKeyPressed;
     }
-    
+
     /**
-     * Show the key number on the LED display when pressed
+     * Get the last key that was released (0-24, or -1 if none)
      */
-    //% block="show key numbers on LEDs"
-    //% weight=75
-    export function showKeyNumbers(): void {
-        control.inBackground(() => {
-            while (true) {
-                let key = readKeyPress();
-                if (key > 0) {
-                    basic.showNumber(key);
-                    basic.pause(500);
-                    basic.clearScreen();
-                }
-                basic.pause(50);
-            }
-        });
+    //% blockId="halloween_keypad_last_released"
+    //% block="last key released"
+    //% weight=80
+    export function getLastKeyReleased(): number {
+        return lastKeyReleased;
     }
-    
+
     /**
      * Do something when a specific key is pressed
-     * @param keyNumber the key number (1-25)
+     * @param keyNumber the key number (0-24)
      * @param handler the code to run when key is pressed
      */
+    //% blockId="halloween_keypad_on_key_pressed"
     //% block="when key $keyNumber is pressed"
-    //% keyNumber.min=1 keyNumber.max=25 keyNumber.defl=1
+    //% keyNumber.min=0 keyNumber.max=24 keyNumber.defl=0
     //% weight=70
     export function onKeyPressed(keyNumber: number, handler: () => void): void {
-        keyHandlers[keyNumber] = handler;
+        // Guard against out-of-range keys
+        if (keyNumber >= 0 && keyNumber <= 24) {
+            keyPressHandlers[keyNumber] = handler;
+        }
     }
-    
+
     /**
-     * Wait for a sequence of keys (like a secret code!)
-     * @param key1 first key in sequence
-     * @param key2 second key in sequence
-     * @param key3 third key in sequence
+     * Do something when a specific key is released
+     * @param keyNumber the key number (0-24)
+     * @param handler the code to run when key is released
      */
-    //% block="wait for secret code: $key1 then $key2 then $key3"
-    //% key1.min=1 key1.max=25 key1.defl=1
-    //% key2.min=1 key2.max=25 key2.defl=2
-    //% key3.min=1 key3.max=25 key3.defl=3
+    //% blockId="halloween_keypad_on_key_released"
+    //% block="when key $keyNumber is released"
+    //% keyNumber.min=0 keyNumber.max=24 keyNumber.defl=0
+    //% weight=70
+    export function onKeyReleased(keyNumber: number, handler: () => void): void {
+        // Guard against out-of-range keys
+        if (keyNumber >= 0 && keyNumber <= 24) {
+            keyReleaseHandlers[keyNumber] = handler;
+        }
+    }
+
+    /**
+     * Do something when any key is pressed (key number is provided)
+     * @param handler the code to run when any key is pressed
+     */
+    //% blockId="halloween_keypad_on_any_pressed"
+    //% block="when any key is pressed"
+    //% draggableParameters="reporter"
+    //% weight=75
+    export function onAnyKeyPressed(handler: (key: number) => void): void {
+        anyKeyPressHandlers.push(handler);
+    }
+
+    /**
+     * Do something when any key is released
+     * @param handler the code to run (receives key number)
+     */
+    //% blockId="halloween_keypad_on_any_released"
+    //% block="when any key is released"
+    //% draggableParameters="reporter"
+    //% weight=74
+    export function onAnyKeyReleased(handler: (key: number) => void): void {
+        anyKeyReleaseHandlers.push(handler);
+    }
+
+    /**
+     * Wait for a specific sequence of keys to be pressed in order
+     * @param keys array of key numbers in sequence
+     */
+    //% blockId="halloween_keypad_wait_sequence"
+    //% block="wait for key sequence $keys (timeout $timeoutMs ms)"
+    //% keys.shadow="lists_create_with"
+    //% timeoutMs.defl=10000
     //% weight=65
-    export function waitForSequence(key1: number, key2: number, key3: number): boolean {
-        let sequence = [key1, key2, key3];
-        let entered: number[] = [];
+    export function waitForSequence(keys: number[], timeoutMs?: number): boolean {
+        let idx = 0;
         let startTime = input.runningTime();
-        let timeout = 10000; // 10 seconds
-        
-        while (entered.length < 3) {
-            // Check timeout
-            if (input.runningTime() - startTime > timeout) {
-                return false;
-            }
-            
-            let key = readKeyPress();
-            if (key > 0) {
-                entered.push(key);
-                
-                // Check if wrong key
-                if (entered[entered.length - 1] !== sequence[entered.length - 1]) {
-                    return false;
-                }
-                
-                // Small delay between keys
-                basic.pause(300);
+        let timeout = (timeoutMs && timeoutMs > 0) ? timeoutMs : 10000; // default 10 seconds
+
+        while (idx < keys.length) {
+            if (input.runningTime() - startTime > timeout) return false;
+
+            let [key, pressed] = readKeyEvent();
+            if (pressed && key > 0) {
+                if (key !== keys[idx]) return false;
+                idx++;
             }
             basic.pause(50);
         }
-        
+
         return true;
     }
-    
+
     /**
-     * Check which row a key is in (1-5)
-     * @param keyNumber the key number (1-25)
+     * Check which row a key is in (0-4)
+     * @param keyNumber the key number (0-24)
      */
+    //% blockId="halloween_keypad_get_row"
     //% block="row of key $keyNumber"
-    //% keyNumber.min=1 keyNumber.max=25 keyNumber.defl=1
+    //% keyNumber.min=0 keyNumber.max=24 keyNumber.defl=0
     //% weight=60
     export function getKeyRow(keyNumber: number): number {
         return Math.ceil(keyNumber / 5);
     }
-    
+
     /**
-     * Check which column a key is in (1-5)
-     * @param keyNumber the key number (1-25)
+     * Check which column a key is in (0-4)
+     * @param keyNumber the key number (0-24)
      */
+    //% blockId="halloween_keypad_get_column"
     //% block="column of key $keyNumber"
-    //% keyNumber.min=1 keyNumber.max=25 keyNumber.defl=1
+    //% keyNumber.min=0 keyNumber.max=24 keyNumber.defl=0
     //% weight=55
     export function getKeyColumn(keyNumber: number): number {
-        return ((keyNumber - 1) % 5) + 1;
+        return (keyNumber % 5);
     }
-    
+
     // ===== Helper Functions (Hidden from blocks) =====
-    
+
     function writeRegister(reg: number, value: number): void {
         pins.i2cWriteNumber(TCA8418_ADDR, (reg << 8) | value, NumberFormat.UInt16BE);
     }
-    
+
     function readRegister(reg: number): number {
         pins.i2cWriteNumber(TCA8418_ADDR, reg, NumberFormat.UInt8BE);
         return pins.i2cReadNumber(TCA8418_ADDR, NumberFormat.UInt8BE);
     }
-    
+
     function clearEvents(): void {
         // Read all events to clear FIFO
         for (let i = 0; i < 10; i++) {
             let event = readRegister(REG_KEY_EVENT_A);
             if (event === 0) break;
         }
+        // Explicitly clear INT_STAT by writing 0x01 (W1C - Write 1 to Clear K_INT bit)
+        writeRegister(REG_INT_STAT, 0x01);
     }
-    
-    function readKeyPress(): number {
-        if (!initialized) return 0;
-        
-        // If IRQ enabled, check pin state first (more efficient)
-        if (irqEnabled && pins.digitalReadPin(DigitalPin.P2) == 1) {
-            // IRQ not active (high), no events pending
-            return 0;
-        }
-        
-        // Check interrupt status register
-        let intStat = readRegister(REG_INT_STAT);
-        
-        if (intStat & 0x01) {  // Key event
-            let event = readRegister(REG_KEY_EVENT_A);
-            
-            if (event > 0) {
-                let keyCode = event & 0x7F;
-                let pressed = !(event & 0x80);  // Bit 7: 0=press, 1=release
-                
+
+    function readKeyEvent(): [number, boolean] {
+        if (!initialized) return [0, false];
+
+        // Drain FIFO until we either find a press inside 5x5 or there are no events
+        while (true) {
+            const event = readRegister(REG_KEY_EVENT_A);
+            if (event === 0) break; // FIFO empty
+
+            const keyCode = event & 0x7F;
+            const pressed = (event & 0x80) != 0;  // Bit 7: 1=press, 0=release
+
+            // Decode row/col: upper nibble=row (0..7), lower nibble=column (1..10)
+            const col = keyCode % 10;
+            const row = Math.floor(keyCode / 10);
+
+            // Only accept keys within 5x5 (rows 0-4, cols 1-5)
+            if (row >= 0 && row < 5 && col >= 1 && col < 6) {
+                const keyNumber = (row * 5) + col - 1; // map to 0..24
                 if (pressed) {
-                    // Convert key code to key number (1-25)
-                    let row = Math.floor(keyCode / 10);
-                    let col = keyCode % 10;
-                    let keyNumber = (row * 5) + col + 1;
-                    
-                    if (keyNumber >= 1 && keyNumber <= 25) {
-                        lastKey = keyNumber;
-                        return keyNumber;
-                    }
+                    lastKeyPressed = keyNumber;
+                } else {
+                    lastKeyReleased = keyNumber;
                 }
+                // Update current pressed state
+                pressedKeys[keyNumber] = pressed;
+                return [keyNumber, pressed];
             }
+
+            // continue draining if out-of-bounds
         }
-        
-        return 0;
+
+        return [0, false];
     }
-    
+
     function processKeyEvents(): void {
         // Called by IRQ handler - process all pending events
         while (true) {
-            let key = readKeyPress();
+            const [key, pressed] = readKeyEvent();
             if (key == 0) break;
-            
+
             // Trigger any registered handlers
-            if (keyHandlers[key]) {
-                keyHandlers[key]();
+            if (pressed) {
+                if (keyPressHandlers[key]) keyPressHandlers[key]();
+                for (let h of anyKeyPressHandlers) h(key);
+            } else {
+                if (keyReleaseHandlers[key]) keyReleaseHandlers[key]();
+                for (let h of anyKeyReleaseHandlers) h(key);
             }
         }
-    }
-    
-    function checkKeys(): void {
-        while (true) {
-            let key = readKeyPress();
-            
-            if (key > 0 && keyHandlers[key]) {
-                keyHandlers[key]();
-            }
-            
-            basic.pause(10);
-        }
+        // Explicitly clear INT_STAT by writing 0x01 (W1C - Write 1 to Clear K_INT bit)
+        writeRegister(REG_INT_STAT, 0x01);
     }
 }

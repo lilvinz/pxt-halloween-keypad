@@ -7,7 +7,47 @@
 function testShowNumbers(): void {
     HalloweenKeypad.initialize()
     basic.showString("Press buttons!")
-    HalloweenKeypad.showKeyNumbers()
+    while (true) {
+        const k = HalloweenKeypad.waitForAnyKey()
+        basic.showNumber(k)
+        basic.pause(300)
+        basic.clearScreen()
+    }
+
+}
+
+/**
+ * Test 7: Press and then release the same key
+ */
+//% block="Test: Press and release 13"
+function testPressAndRelease(): void {
+    HalloweenKeypad.initialize()
+    basic.showString("Press 13!")
+    HalloweenKeypad.waitForKeyPress(13)
+    basic.showIcon(IconNames.SmallHeart)
+    basic.showString("Release 13!")
+    HalloweenKeypad.waitForKeyRelease(13)
+    basic.showIcon(IconNames.Heart)
+}
+
+/**
+ * Test 8: Show last pressed and released keys
+ */
+//% block="Test: Show last press/release"
+function testLastKeys(): void {
+    HalloweenKeypad.initialize()
+    basic.showString("Press any")
+    while (true) {
+        const k = HalloweenKeypad.waitForAnyKey()
+        basic.showString("P:")
+        basic.showNumber(HalloweenKeypad.getLastKeyPressed())
+        basic.pause(200)
+        basic.showString("R:")
+        HalloweenKeypad.waitForKeyRelease(k)
+        basic.showNumber(HalloweenKeypad.getLastKeyReleased())
+        basic.pause(200)
+        basic.clearScreen()
+    }
 }
 
 /**
@@ -17,7 +57,7 @@ function testShowNumbers(): void {
 function testMiddleButton(): void {
     HalloweenKeypad.initialize()
     basic.showString("Press 13!")
-    HalloweenKeypad.waitForKey(13)
+    HalloweenKeypad.waitForKeyPress(13)
     basic.showIcon(IconNames.Yes)
     music.playTone(523, 500)
 }
@@ -30,7 +70,7 @@ function testSecretCode(): void {
     HalloweenKeypad.initialize()
     basic.showString("Code: 1-2-3")
     
-    if (HalloweenKeypad.waitForSequence(1, 2, 3)) {
+    if (HalloweenKeypad.waitForSequence([1, 2, 3])) {
         basic.showIcon(IconNames.Yes)
         basic.showString("Correct!")
         music.playMelody("C D E F G A B C5 ", 120)
@@ -76,7 +116,7 @@ function testCountingGame(): void {
     
     for (let i = 1; i <= 5; i++) {
         basic.showNumber(i)
-        HalloweenKeypad.waitForKey(i)
+        HalloweenKeypad.waitForKeyPress(i)
         music.playTone(262 + (i * 50), 200)
     }
     
