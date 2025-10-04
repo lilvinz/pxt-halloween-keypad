@@ -1,6 +1,6 @@
 {
     "name": "halloween-keypad",
-    "version": "1.0.1",
+    "version": "1.0.3",
     "description": "TCA8418 5x5 Keypad Driver for Halloween Box - Kid Friendly Blocks",
     "license": "MIT",
     "dependencies": {
