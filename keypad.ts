@@ -19,8 +19,8 @@ namespace HalloweenKeypad {
     const REG_DEBOUNCE_DIS3 = 0x2B;
 
     let initialized = false;
-    let lastKeyPressed = 0;
-    let lastKeyReleased = 0;
+    let lastKeyPressed = -1;
+    let lastKeyReleased = -1;
 
     // Track currently pressed keys (0..24)
     let pressedKeys: boolean[] = [];
@@ -40,17 +40,16 @@ namespace HalloweenKeypad {
     //% block="initialize Halloween keypad"
     //% weight=100
     export function initialize(): void {
-        if (initialized) return;
-
         // Configure for 5x5 keypad matrix
         writeRegister(REG_KP_GPIO1, 0x1f);  // R0-R4 as keypad
         writeRegister(REG_KP_GPIO2, 0x1f);  // C0-C4 as keypad
         writeRegister(REG_KP_GPIO3, 0x00);  // Not used
 
-        // Disable debounce for GPIOs
-        writeRegister(REG_DEBOUNCE_DIS1, 0x1F);
-        writeRegister(REG_DEBOUNCE_DIS2, 0x1F);
-        writeRegister(REG_DEBOUNCE_DIS3, 0x03);
+        // Enable debounce for R0-R4 and C0-C4 (5x5 keypad)
+        // 0 = debounce enabled, 1 = debounce disabled
+        writeRegister(REG_DEBOUNCE_DIS1, 0xE0);  // R0-R4 enabled (bits 0-4=0), R5-R7 disabled (bits 5-7=1)
+        writeRegister(REG_DEBOUNCE_DIS2, 0xE0);  // C0-C4 enabled (bits 0-4=0), C5-C7 disabled (bits 5-7=1)
+        writeRegister(REG_DEBOUNCE_DIS3, 0xFF);  // All disabled (not used)
 
         clearEvents();
 
@@ -59,6 +58,8 @@ namespace HalloweenKeypad {
         writeRegister(REG_CFG, 0x09);  // Enable key events + interrupt (edge mode)
 
         // Reset pressed state
+        lastKeyPressed = -1;
+        lastKeyReleased = -1;
         for (let i = 0; i < 25; i++) pressedKeys[i] = false;
 
         initialized = true;
@@ -86,11 +87,11 @@ namespace HalloweenKeypad {
         const start = input.runningTime();
         while (true) {
             const [key, pressed] = readKeyEvent();
-            if (pressed && key > 0) {
+            if (pressed && key >= 0) {
                 return key;
             }
             if (timeoutMs && timeoutMs > 0 && (input.runningTime() - start) > timeoutMs) {
-                return 0;
+                return -1;
             }
             basic.pause(10);
         }
@@ -107,11 +108,11 @@ namespace HalloweenKeypad {
         const start = input.runningTime();
         while (true) {
             const [key, pressed] = readKeyEvent();
-            if (!pressed && key > 0) {
+            if (!pressed && key >= 0) {
                 return key;
             }
             if (timeoutMs && timeoutMs > 0 && (input.runningTime() - start) > timeoutMs) {
-                return 0;
+                return -1;
             }
             basic.pause(10);
         }
@@ -270,7 +271,7 @@ namespace HalloweenKeypad {
             if (input.runningTime() - startTime > timeout) return false;
 
             let [key, pressed] = readKeyEvent();
-            if (pressed && key > 0) {
+            if (pressed && key >= 0) {
                 if (key !== keys[idx]) return false;
                 idx++;
             }
@@ -289,7 +290,7 @@ namespace HalloweenKeypad {
     //% keyNumber.min=0 keyNumber.max=24 keyNumber.defl=0
     //% weight=60
     export function getKeyRow(keyNumber: number): number {
-        return Math.ceil(keyNumber / 5);
+        return Math.floor(keyNumber / 5);
     }
 
     /**
@@ -326,7 +327,7 @@ namespace HalloweenKeypad {
     }
 
     function readKeyEvent(): [number, boolean] {
-        if (!initialized) return [0, false];
+        if (!initialized) return [-1, false];
 
         // Drain FIFO until we either find a press inside 5x5 or there are no events
         while (true) {
@@ -356,14 +357,14 @@ namespace HalloweenKeypad {
             // continue draining if out-of-bounds
         }
 
-        return [0, false];
+        return [-1, false];
     }
 
     function processKeyEvents(): void {
         // Called by IRQ handler - process all pending events
         while (true) {
             const [key, pressed] = readKeyEvent();
-            if (key == 0) break;
+            if (key == -1) break;
 
             // Trigger any registered handlers
             if (pressed) {
