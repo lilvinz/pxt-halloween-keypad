@@ -1,4 +1,5 @@
 {
+  "HalloweenKeypad.clearEventQueue|block": "wartende Tastenereignisse löschen",
   "HalloweenKeypad.getKeyColumn|block": "Spalte der Taste $keyNumber",
   "HalloweenKeypad.getKeyRow|block": "Zeile der Taste $keyNumber",
   "HalloweenKeypad.getLastKeyPressed|block": "letzte gedrückte Taste",

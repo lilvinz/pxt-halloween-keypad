@@ -25,6 +25,13 @@ namespace HalloweenKeypad {
     // Track currently pressed keys (0..24)
     let pressedKeys: boolean[] = [];
 
+    // Event queue to bridge interrupt handler and polling waiters
+    interface KeyEvent {
+        key: number;
+        pressed: boolean;
+    }
+    let eventQueue: KeyEvent[] = [];
+
     // Key press handlers for each button (0-24)
     let keyPressHandlers: (() => void)[] = [];
     let keyReleaseHandlers: (() => void)[] = [];
@@ -61,6 +68,9 @@ namespace HalloweenKeypad {
         lastKeyPressed = -1;
         lastKeyReleased = -1;
         for (let i = 0; i < 25; i++) pressedKeys[i] = false;
+        
+        // Clear software event queue
+        eventQueue = [];
 
         initialized = true;
 
@@ -86,9 +96,9 @@ namespace HalloweenKeypad {
     export function waitForAnyKey(timeoutMs?: number): number {
         const start = input.runningTime();
         while (true) {
-            const [key, pressed] = readKeyEvent();
-            if (pressed && key >= 0) {
-                return key;
+            const event = dequeueEvent();
+            if (event && event.pressed && event.key >= 0) {
+                return event.key;
             }
             if (timeoutMs && timeoutMs > 0 && (input.runningTime() - start) > timeoutMs) {
                 return -1;
@@ -107,9 +117,9 @@ namespace HalloweenKeypad {
     export function waitForAnyKeyRelease(timeoutMs?: number): number {
         const start = input.runningTime();
         while (true) {
-            const [key, pressed] = readKeyEvent();
-            if (!pressed && key >= 0) {
-                return key;
+            const event = dequeueEvent();
+            if (event && !event.pressed && event.key >= 0) {
+                return event.key;
             }
             if (timeoutMs && timeoutMs > 0 && (input.runningTime() - start) > timeoutMs) {
                 return -1;
@@ -130,8 +140,8 @@ namespace HalloweenKeypad {
     export function waitForKeyPress(keyNumber: number, timeoutMs?: number): boolean {
         const start = input.runningTime();
         while (true) {
-            const [key, pressed] = readKeyEvent();
-            if (pressed && key === keyNumber) {
+            const event = dequeueEvent();
+            if (event && event.pressed && event.key === keyNumber) {
                 return true;
             }
             if (timeoutMs && timeoutMs > 0 && (input.runningTime() - start) > timeoutMs) {
@@ -153,8 +163,8 @@ namespace HalloweenKeypad {
     export function waitForKeyRelease(keyNumber: number, timeoutMs?: number): boolean {
         const start = input.runningTime();
         while (true) {
-            const [key, pressed] = readKeyEvent();
-            if (!pressed && key === keyNumber) {
+            const event = dequeueEvent();
+            if (event && !event.pressed && event.key === keyNumber) {
                 return true;
             }
             if (timeoutMs && timeoutMs > 0 && (input.runningTime() - start) > timeoutMs) {
@@ -195,6 +205,17 @@ namespace HalloweenKeypad {
     //% weight=80
     export function getLastKeyReleased(): number {
         return lastKeyReleased;
+    }
+
+    /**
+     * Clear all pending key events from the queue
+     * Useful to discard old keypresses (e.g., after showing instructions, before starting a game)
+     */
+    //% blockId="halloween_keypad_clear_queue"
+    //% block="clear pending key events"
+    //% weight=78
+    export function clearEventQueue(): void {
+        eventQueue = [];
     }
 
     /**
@@ -270,12 +291,12 @@ namespace HalloweenKeypad {
         while (idx < keys.length) {
             if (input.runningTime() - startTime > timeout) return false;
 
-            let [key, pressed] = readKeyEvent();
-            if (pressed && key >= 0) {
-                if (key !== keys[idx]) return false;
+            let event = dequeueEvent();
+            if (event && event.pressed && event.key >= 0) {
+                if (event.key !== keys[idx]) return false;
                 idx++;
             }
-            basic.pause(50);
+            basic.pause(10);
         }
 
         return true;
@@ -326,10 +347,14 @@ namespace HalloweenKeypad {
         writeRegister(REG_INT_STAT, 0x01);
     }
 
-    function readKeyEvent(): [number, boolean] {
-        if (!initialized) return [-1, false];
+    /**
+     * Read a single key event from hardware FIFO (internal use)
+     * Returns the key event or null if FIFO is empty
+     */
+    function readKeyEventFromHardware(): KeyEvent | null {
+        if (!initialized) return null;
 
-        // Drain FIFO until we either find a press inside 5x5 or there are no events
+        // Drain FIFO until we find a valid 5x5 key or FIFO is empty
         while (true) {
             const event = readRegister(REG_KEY_EVENT_A);
             if (event === 0) break; // FIFO empty
@@ -344,35 +369,59 @@ namespace HalloweenKeypad {
             // Only accept keys within 5x5 (rows 0-4, cols 1-5)
             if (row >= 0 && row < 5 && col >= 1 && col < 6) {
                 const keyNumber = (row * 5) + col - 1; // map to 0..24
-                if (pressed) {
-                    lastKeyPressed = keyNumber;
-                } else {
-                    lastKeyReleased = keyNumber;
-                }
-                // Update current pressed state
-                pressedKeys[keyNumber] = pressed;
-                return [keyNumber, pressed];
+                return { key: keyNumber, pressed: pressed };
             }
 
             // continue draining if out-of-bounds
         }
 
-        return [-1, false];
+        return null;
+    }
+
+    /**
+     * Dequeue an event from the software queue
+     * Updates lastKeyPressed/lastKeyReleased and pressedKeys state
+     */
+    function dequeueEvent(): KeyEvent | null {
+        if (eventQueue.length === 0) return null;
+
+        const event = eventQueue.shift();
+        if (event) {
+            // Update tracking state
+            if (event.pressed) {
+                lastKeyPressed = event.key;
+            } else {
+                lastKeyReleased = event.key;
+            }
+            pressedKeys[event.key] = event.pressed;
+        }
+        return event;
     }
 
     function processKeyEvents(): void {
-        // Called by IRQ handler - process all pending events
+        // Called by IRQ handler - read from hardware and enqueue events
         while (true) {
-            const [key, pressed] = readKeyEvent();
-            if (key == -1) break;
+            const event = readKeyEventFromHardware();
+            if (!event) break;
 
-            // Trigger any registered handlers
-            if (pressed) {
-                if (keyPressHandlers[key]) keyPressHandlers[key]();
-                for (let h of anyKeyPressHandlers) h(key);
+            // Add to queue for waiters
+            eventQueue.push(event);
+
+            // Also update state for immediate handlers
+            if (event.pressed) {
+                lastKeyPressed = event.key;
             } else {
-                if (keyReleaseHandlers[key]) keyReleaseHandlers[key]();
-                for (let h of anyKeyReleaseHandlers) h(key);
+                lastKeyReleased = event.key;
+            }
+            pressedKeys[event.key] = event.pressed;
+
+            // Trigger any registered handlers immediately
+            if (event.pressed) {
+                if (keyPressHandlers[event.key]) keyPressHandlers[event.key]();
+                for (let h of anyKeyPressHandlers) h(event.key);
+            } else {
+                if (keyReleaseHandlers[event.key]) keyReleaseHandlers[event.key]();
+                for (let h of anyKeyReleaseHandlers) h(event.key);
             }
         }
         // Explicitly clear INT_STAT by writing 0x01 (W1C - Write 1 to Clear K_INT bit)

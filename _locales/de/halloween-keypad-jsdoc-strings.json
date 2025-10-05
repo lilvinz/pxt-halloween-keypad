@@ -1,5 +1,6 @@
 {
   "HalloweenKeypad": "Halloween-Tastatur Blöcke - Einfache 5x5 Tastatur für Kinder!\n\nHalloween-Tastatur C++ Implementierung\nLow-Level I2C Operationen für TCA8418",
+  "HalloweenKeypad.clearEventQueue": "Lösche alle wartenden Tastenereignisse aus der Warteschlange\nNützlich um alte Tastendrücke zu verwerfen (z.B. nach Anweisungen, vor Spielstart)",
   "HalloweenKeypad.getKeyColumn": "Prüfe in welcher Spalte sich eine Taste befindet (0-4)",
   "HalloweenKeypad.getKeyColumn|param|keyNumber": "die Tastennummer (0-24)",
   "HalloweenKeypad.getKeyRow": "Prüfe in welcher Zeile sich eine Taste befindet (0-4)",
