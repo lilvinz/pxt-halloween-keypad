@@ -94,6 +94,12 @@ namespace HalloweenKeypad {
     //% timeoutMs.defl=0
     //% weight=95
     export function waitForAnyKey(timeoutMs?: number): number {
+        // Instant check if timeout is 0
+        if (timeoutMs === 0) {
+            const event = dequeueEvent();
+            return (event && event.pressed && event.key >= 0) ? event.key : -1;
+        }
+        
         const start = input.runningTime();
         while (true) {
             const event = dequeueEvent();
@@ -115,6 +121,12 @@ namespace HalloweenKeypad {
     //% timeoutMs.defl=0
     //% weight=95
     export function waitForAnyKeyRelease(timeoutMs?: number): number {
+        // Instant check if timeout is 0
+        if (timeoutMs === 0) {
+            const event = dequeueEvent();
+            return (event && !event.pressed && event.key >= 0) ? event.key : -1;
+        }
+        
         const start = input.runningTime();
         while (true) {
             const event = dequeueEvent();
@@ -138,6 +150,12 @@ namespace HalloweenKeypad {
     //% timeoutMs.defl=0
     //% weight=90
     export function waitForKeyPress(keyNumber: number, timeoutMs?: number): boolean {
+        // Instant check if timeout is 0
+        if (timeoutMs === 0) {
+            const event = dequeueEvent();
+            return !!(event && event.pressed && event.key === keyNumber);
+        }
+        
         const start = input.runningTime();
         while (true) {
             const event = dequeueEvent();
@@ -161,6 +179,12 @@ namespace HalloweenKeypad {
     //% timeoutMs.defl=0
     //% weight=90
     export function waitForKeyRelease(keyNumber: number, timeoutMs?: number): boolean {
+        // Instant check if timeout is 0
+        if (timeoutMs === 0) {
+            const event = dequeueEvent();
+            return !!(event && !event.pressed && event.key === keyNumber);
+        }
+        
         const start = input.runningTime();
         while (true) {
             const event = dequeueEvent();
@@ -287,6 +311,16 @@ namespace HalloweenKeypad {
         let idx = 0;
         let startTime = input.runningTime();
         let timeout = (timeoutMs && timeoutMs > 0) ? timeoutMs : 10000; // default 10 seconds
+        
+        // Instant check if timeout is 0 - try to match entire sequence from queue
+        if (timeoutMs === 0) {
+            while (idx < keys.length) {
+                let event = dequeueEvent();
+                if (!event || !event.pressed || event.key !== keys[idx]) return false;
+                idx++;
+            }
+            return true;
+        }
 
         while (idx < keys.length) {
             if (input.runningTime() - startTime > timeout) return false;
