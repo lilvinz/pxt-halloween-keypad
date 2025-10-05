@@ -343,8 +343,8 @@ namespace HalloweenKeypad {
             let event = readRegister(REG_KEY_EVENT_A);
             if (event === 0) break;
         }
-        // Explicitly clear INT_STAT by writing 0x01 (W1C - Write 1 to Clear K_INT bit)
-        writeRegister(REG_INT_STAT, 0x01);
+        // Explicitly clear INT_STAT: 0x03 = clear both K_INT (bit 0) and OVR_FLOW_INT (bit 1)
+        writeRegister(REG_INT_STAT, 0x03);
     }
 
     /**
@@ -424,7 +424,8 @@ namespace HalloweenKeypad {
                 for (let h of anyKeyReleaseHandlers) h(event.key);
             }
         }
-        // Explicitly clear INT_STAT by writing 0x01 (W1C - Write 1 to Clear K_INT bit)
-        writeRegister(REG_INT_STAT, 0x01);
+        // Explicitly clear INT_STAT: 0x03 = clear both K_INT (bit 0) and OVR_FLOW_INT (bit 1)
+        // Write 1 to Clear (W1C) register
+        writeRegister(REG_INT_STAT, 0x03);
     }
 }
