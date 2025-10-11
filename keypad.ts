@@ -61,8 +61,8 @@ namespace HalloweenKeypad {
         clearEvents();
 
         // Configure interrupts and events
-        // 0x09 = INT enabled + Event mode + OVR flow (level-triggered, stays low while FIFO has events)
-        writeRegister(REG_CFG, 0x09);  // Enable key events + interrupt (edge mode)
+        // 0x11 = INT_CFG | KE_IEN (edge interrupt, key events enabled)
+        writeRegister(REG_CFG, 0x11);
 
         // Reset pressed state
         lastKeyPressed = -1;
@@ -458,8 +458,7 @@ namespace HalloweenKeypad {
                 for (let h of anyKeyReleaseHandlers) h(event.key);
             }
         }
-        // Explicitly clear INT_STAT: 0x03 = clear both K_INT (bit 0) and OVR_FLOW_INT (bit 1)
-        // Write 1 to Clear (W1C) register
-        writeRegister(REG_INT_STAT, 0x03);
+        // Explicitly clear all flags in INT_STAT
+        writeRegister(REG_INT_STAT, 0x1f);
     }
 }
